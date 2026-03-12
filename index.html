@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>외국인 눈으로 본 한국 주식 — 매력도 분석</title>
+<meta name="description" content="환율·환헤지 비용·세금까지 반영한 외국인의 실질 체감 가격 계산기. 한국 증시의 외국인 투자 매력도를 숫자로 확인하세요.">
+<meta property="og:title" content="외국인 눈으로 본 한국 주식 — 매력도 분석">
+<meta property="og:description" content="USD 기준 체감 가격, 환헤지 비용, 거래세 등 외국인 관점의 실질 비용을 계산합니다.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700;900&family=Noto+Sans+KR:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+
+<div class="masthead">
+  <div class="masthead-top">
+    <span class="masthead-brand">한국 주식 · 외국인 매력도 분석</span>
+    <span class="masthead-date" id="today-date"></span>
+  </div>
+  <div class="masthead-hero">
+    <div class="hero-kicker anim">FOREIGN INVESTOR VIEW</div>
+    <h1 class="hero-title anim d1">외국인 투자자는<br>지금 한국 주식을<br><em>얼마나 매력적으로</em> 볼까?</h1>
+    <p class="hero-desc anim d2">환율·환헤지 비용·세금까지 반영한 외국인의 <strong style="color:#f5c842">실질 체감 가격</strong>을 계산합니다. 숫자로 보는 한국 증시의 진짜 매력도.</p>
+  </div>
+  <div class="fx-ticker anim d3">
+    <div class="fx-item"><span class="fx-label">USD/KRW</span><span class="fx-val" id="fx-spot">로딩 중...</span></div>
+    <div class="fx-item"><span class="fx-label">$1 =</span><span class="fx-val" id="fx-display">—</span></div>
+    <div class="fx-item"><span class="fx-label">환헤지 비용 (1Y)</span><span class="fx-val" id="fx-hedge-display">—</span></div>
+    <div class="fx-item"><span class="fx-label">총 거래 마찰</span><span class="fx-val" id="fx-total-cost">—</span></div>
+    <div class="fx-item" style="margin-left:auto">
+      <span class="fx-badge" id="rate-badge">로딩</span>
+      <span class="fx-label" id="rate-time" style="margin-left:8px"></span>
+    </div>
+  </div>
+  <!-- 환율 수동입력 (API 실패 시 노출) -->
+  <div id="manual-fx-bar" style="display:none; background:#1a1208; border-top:1px solid #3a2a00; padding:10px 40px; align-items:center; gap:12px; flex-wrap:wrap;">
+    <span style="font-family:var(--mono);font-size:11px;color:#f5c842;">⚠ 환율 자동 조회 실패 — 직접 입력하세요</span>
+    <span style="font-family:var(--mono);font-size:11px;color:#888;">현재 USD/KRW 환율:</span>
+    <input type="number" id="manual-fx-input" placeholder="예: 1380" min="800" max="2000"
+      style="width:100px;background:#111;border:1px solid #3a3a3a;color:#f5f3ee;font-family:var(--mono);font-size:13px;padding:5px 10px;border-radius:3px;outline:none;">
+    <button onclick="applyManualFX()"
+      style="background:#b8860b;color:#fff;border:none;padding:6px 14px;font-family:var(--mono);font-size:11px;border-radius:3px;cursor:pointer;letter-spacing:0.5px;">적용</button>
+    <span style="font-family:var(--mono);font-size:10px;color:#666;">네이버금융 / 하나은행 기준 환율 참고</span>
+  </div>
+</div>
+
+<main class="main">
+
+  <!-- 섹션 1: 매력도 스코어 -->
+  <div class="section anim d1">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2 class="section-title">현재 한국 증시 외국인 매력도</h2>
+      <span class="section-sub" id="score-updated">환율 로딩 중...</span>
+    </div>
+    <div class="scorecard">
+      <div class="scorecard-header">
+        <div class="score-main">
+          <div class="score-circle" id="score-circle">
+            <span class="score-number" id="score-number">—</span>
+            <span class="score-max">/100</span>
+          </div>
+          <div class="score-text">
+            <h3 id="score-label">분석 중...</h3>
+            <p class="score-verdict" id="score-verdict">환율 데이터를 불러오는 중입니다.</p>
+          </div>
+        </div>
+        <span class="score-tag" id="score-tag">—</span>
+      </div>
+      <div class="metrics-grid" id="metrics-grid"></div>
+    </div>
+    <div class="cost-visual">
+      <div class="cost-title">외국인이 $10,000 어치 한국 주식을 1년 보유한다면?</div>
+      <div class="cost-subtitle">총 투자금 대비 비용 구성 (보유 12개월 기준, 파라미터 설정값 반영)</div>
+      <div>
+        <div class="stacked-label"><span>순수 주식 가치</span><span id="bar-cost-label">총 비용 —%</span></div>
+        <div class="stacked-bar">
+          <div class="bar-seg seg-base" id="bar-base" style="flex:94"><span>주식 가치</span></div>
+          <div class="bar-seg seg-hedge" id="bar-hedge" style="flex:2"><span></span></div>
+          <div class="bar-seg seg-tx" id="bar-tx" style="flex:0.36"><span></span></div>
+          <div class="bar-seg seg-div" id="bar-div" style="flex:0.5"><span></span></div>
+        </div>
+      </div>
+      <div class="cost-legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#1a5cb8"></div>순수 주식 가치</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#7b3fa0"></div>환헤지 비용 (스왑포인트)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#b8860b"></div>증권거래세 (왕복)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#6b7c9a"></div>배당 원천징수 영향</div>
+      </div>
+      <div class="footnote">
+        <strong>환헤지 비용(스왑포인트)</strong>은 미국·한국 금리 차이에 따른 통화 헤징 비용입니다. 미국 금리가 한국보다 높을수록 외국인 입장에서 비용이 증가해 한국 주식의 매력이 낮아집니다. 반대로 금리차가 줄거나 역전되면 <strong>외국인에게 유리</strong>해집니다.
+      </div>
+    </div>
+  </div>
+
+  <!-- 섹션 2: 인사이트 카드 -->
+  <div class="section anim d2">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2 class="section-title">외국인 관점에서 본 주요 변수</h2>
+    </div>
+    <div class="insight-grid">
+      <div class="insight-card" id="insight-fx">
+        <div class="insight-icon">💱</div>
+        <div class="insight-heading">환율 수준</div>
+        <div class="insight-body" id="insight-fx-body">환율 데이터 로딩 중...</div>
+        <div class="insight-stat" id="insight-fx-stat"></div>
+      </div>
+      <div class="insight-card" id="insight-hedge">
+        <div class="insight-icon">🔒</div>
+        <div class="insight-heading">환헤지 비용 (금리차)</div>
+        <div class="insight-body" id="insight-hedge-body">—</div>
+        <div class="insight-stat" id="insight-hedge-stat"></div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon">📋</div>
+        <div class="insight-heading">거래세 · 세금 부담</div>
+        <div class="insight-body">증권거래세 0.18%(KOSPI)는 미국(0%)·일본(0%)과 비교하면 다소 높은 편입니다. 하지만 단기투자보다 <strong>중장기 보유</strong> 시 상대적 부담은 줄어듭니다.</div>
+        <div class="insight-stat">거래세 왕복: <strong id="tx-cost-stat">0.36%</strong> · 배당 원천징수(조약 기준): <strong>15%</strong></div>
+      </div>
+      <div class="insight-card positive">
+        <div class="insight-icon">📉</div>
+        <div class="insight-heading">코리아 디스카운트 vs 기회</div>
+        <div class="insight-body">한국 주식은 글로벌 대비 낮은 PBR·PER로 거래되는 경우가 많습니다. 비용 부담을 감수하더라도 <strong>저평가 메리트</strong>가 외국인을 끌어들이는 핵심 요인입니다. 2024년 기업 밸류업 프로그램도 외국인 관심을 높이는 요소입니다.</div>
+        <div class="insight-stat">KOSPI PBR(추정): <strong>약 0.9~1.1배</strong> — S&amp;P500 대비 현저히 낮음</div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon">📊</div>
+        <div class="insight-heading">환율 변동성 리스크</div>
+        <div class="insight-body">원화는 위험자산으로 분류돼 글로벌 불확실성 시 급격히 약세를 보일 수 있습니다. 헤징 없이 투자할 경우 환차손이 주식 수익을 상쇄할 수 있어 <strong>헤지 비용이 정당화</strong>되기도 합니다.</div>
+        <div class="insight-stat">원화 특성: <strong>준기축통화 미보유, 위기 시 약세 경향</strong></div>
+      </div>
+      <div class="insight-card positive">
+        <div class="insight-icon">🌏</div>
+        <div class="insight-heading">MSCI 편입 · 시장 접근성</div>
+        <div class="insight-body">한국은 MSCI 신흥국(EM) 지수 편입국으로, 글로벌 패시브 자금이 자동 유입됩니다. MSCI 선진국(DM) 격상 논의가 재개될 경우 <strong>대규모 외국인 매수</strong>가 기대됩니다.</div>
+        <div class="insight-stat">MSCI EM 비중: <strong>약 3~4%</strong> — 패시브 자금 자동 유입</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 섹션 3: 종목 계산기 -->
+  <div class="section anim d3">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2 class="section-title">종목별 외국인 체감 가격 계산기</h2>
+    </div>
+
+    <div class="params-bar">
+      <div class="param-item"><label>한국 기준금리 (%)</label><input type="number" id="p-kr" value="3.0" step="0.1" min="0" max="20"></div>
+      <div class="param-item"><label>미국 기준금리 (%)</label><input type="number" id="p-us" value="4.5" step="0.1" min="0" max="20"></div>
+      <div class="param-item"><label>거래세 (%)</label><input type="number" id="p-tx" value="0.18" step="0.01" min="0" max="1"></div>
+      <div class="param-item"><label>배당 원천징수 (%)</label><input type="number" id="p-div" value="15" step="0.5" min="0" max="30"></div>
+      <div class="param-item"><label>보유기간 (개월)</label><input type="number" id="p-hold" value="12" step="1" min="1" max="120"></div>
+      <div class="param-item"><label>평균 배당수익률 (%)</label><input type="number" id="p-yield" value="2.0" step="0.1" min="0" max="20"></div>
+      <button class="params-apply" onclick="applyParams()">적용</button>
+    </div>
+
+    <div class="calculator">
+      <div class="calc-header">
+        <div><h3>종목 추가하기</h3><p>KRX 상장 종목의 원화 가격을 입력하면 외국인 체감 가격을 자동 계산합니다</p></div>
+        <button class="btn-sample" onclick="loadSamples()">대표 종목 불러오기</button>
+      </div>
+      <div class="calc-body">
+        <div class="input-row">
+          <div class="field"><label>종목명</label><input type="text" id="in-name" placeholder="예: 삼성전자"></div>
+          <div class="field"><label>종목코드</label><input type="text" id="in-code" placeholder="005930"></div>
+          <div class="field"><label>현재가 (원 ₩)</label><input type="number" id="in-price" placeholder="74000"></div>
+          <button class="btn-add" onclick="addStock()">+ 추가</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align:left">종목</th>
+                <th>원화 현재가</th>
+                <th>USD 환산가</th>
+                <th>환헤지 비용</th>
+                <th>거래세 (왕복)</th>
+                <th>배당세 영향</th>
+                <th>총 비용률</th>
+                <th>외국인 체감가</th>
+                <th>매력도</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="table-body">
+              <tr><td colspan="10"><div class="empty-table"><div class="icon">📈</div><p>종목을 추가하거나 '대표 종목 불러오기'를 눌러보세요</p></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="footnote">
+          <strong>체감가</strong> = USD 환산가 + 환헤지 비용 + 거래세(왕복) + 배당세 손실 영향 /
+          <strong>매력도</strong>: 총 비용률 3% 미만 ✦ 매력적, 3~6% △ 보통, 6% 초과 ✕ 부담 /
+          본 계산은 교육 목적의 추정치이며 실제 투자 결정에는 전문가 자문을 권장합니다.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <p>본 페이지는 외국인 투자자의 한국 주식 체감 비용을 이해하기 위한 교육용 도구입니다.</p>
+  <p>환율 데이터 (우선순위): ① jsdelivr/fawazahmed0 CDN (무제한) → ② exchangerate-api.com → ③ open.er-api.com</p>
+  <p>모든 수치는 추정값이며 실제 투자 결과와 다를 수 있습니다.</p>
+</footer>
+
+<script src="src/main.js"></script>
+</body>
+</html>
