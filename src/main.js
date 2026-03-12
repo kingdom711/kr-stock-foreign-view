@@ -112,14 +112,14 @@ async function initFX() {
   }
 }
 
-function calcCosts(){
-  const p = S.p;
+function calcCostsFor(p){
   const hedgePct = Math.max(0, p.us - p.kr) * (p.hold/12);
   const txPct = p.tx * 2;
   const divPct = p.yield * (p.div/100) * (p.hold/12);
   const totalPct = hedgePct + txPct + divPct;
   return {hedgePct, txPct, divPct, totalPct};
 }
+function calcCosts(){ return calcCostsFor(S.p); }
 
 function calcStock(krwPrice){
   if(!S.fxRate) return null;
@@ -136,22 +136,25 @@ function calcStock(krwPrice){
   };
 }
 
-function calcScore(){
-  if(!S.fxRate) return null;
-  const {totalPct} = calcCosts();
+function calcScoreFor(fxRate, p){
+  const {totalPct} = calcCostsFor(p);
   const costScore = Math.max(0, 40 - totalPct * 5);
   let fxScore;
-  if(S.fxRate < 1200) fxScore=20;
-  else if(S.fxRate<=1350) fxScore=30;
-  else if(S.fxRate<=1450) fxScore=24;
+  if(fxRate < 1200) fxScore=20;
+  else if(fxRate<=1350) fxScore=30;
+  else if(fxRate<=1450) fxScore=24;
   else fxScore=16;
-  const rateDiff = S.p.us - S.p.kr;
+  const rateDiff = p.us - p.kr;
   let rateScore;
   if(rateDiff<=0) rateScore=30;
   else if(rateDiff<=1) rateScore=24;
   else if(rateDiff<=2) rateScore=16;
   else rateScore=8;
   return {total:Math.round(costScore+fxScore+rateScore), costScore, fxScore, rateScore};
+}
+function calcScore(){
+  if(!S.fxRate) return null;
+  return calcScoreFor(S.fxRate, S.p);
 }
 
 function updateAll(){
@@ -369,6 +372,155 @@ function applyParams(){
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 document.getElementById('in-price').addEventListener('keydown', e=>{ if(e.key==='Enter') addStock(); });
+
+// ── 시나리오 시뮬레이터 ──────────────────────────────────────────
+S.scenarios = [];
+let scenarioCounter = 0;
+
+const PRESETS = {
+  bullish:  { name:'낙관', fxRate:1200, kr:3.5, us:3.5 },
+  base:     { name:'현재 기준', fxRate:null, kr:null, us:null }, // null = 현재 값 사용
+  bearish:  { name:'비관', fxRate:1500, kr:2.5, us:5.5 }
+};
+
+function loadPreset(type){
+  const preset = PRESETS[type];
+  const fx = preset.fxRate ?? S.fxRate ?? 1380;
+  const kr = preset.kr ?? S.p.kr;
+  const us = preset.us ?? S.p.us;
+  document.getElementById('sl-fx').value = fx;
+  document.getElementById('sl-kr').value = kr;
+  document.getElementById('sl-us').value = us;
+  updateSliderLabels();
+  // 프리셋 버튼 활성 표시
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.preset-btn.${type}`)?.classList.add('active');
+}
+
+function updateSliderLabels(){
+  const fx = parseFloat(document.getElementById('sl-fx').value);
+  const kr = parseFloat(document.getElementById('sl-kr').value);
+  const us = parseFloat(document.getElementById('sl-us').value);
+  document.getElementById('sl-fx-val').textContent = fx.toLocaleString('ko-KR');
+  document.getElementById('sl-kr-val').textContent = kr.toFixed(2) + '%';
+  document.getElementById('sl-us-val').textContent = us.toFixed(2) + '%';
+}
+
+function addCustomScenario(){
+  if(S.scenarios.length >= 4) return;
+  const fxRate = parseFloat(document.getElementById('sl-fx').value);
+  const kr = parseFloat(document.getElementById('sl-kr').value);
+  const us = parseFloat(document.getElementById('sl-us').value);
+  const rateDiff = us - kr;
+  // 프리셋 이름 매칭
+  let name;
+  const activePreset = document.querySelector('.preset-btn.active');
+  if(activePreset){
+    const type = activePreset.classList.contains('bullish') ? 'bullish'
+               : activePreset.classList.contains('bearish') ? 'bearish' : 'base';
+    name = PRESETS[type].name;
+  } else {
+    scenarioCounter++;
+    name = '커스텀 #' + scenarioCounter;
+  }
+  // 중복 방지: 같은 조건이면 추가하지 않음
+  const dup = S.scenarios.find(s => s.fxRate === fxRate && s.kr === kr && s.us === us);
+  if(dup) return;
+
+  const p = { ...S.p, kr, us };
+  S.scenarios.push({ name, fxRate, kr, us, p });
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  renderScenarios();
+}
+
+function removeScenario(i){
+  S.scenarios.splice(i, 1);
+  renderScenarios();
+}
+
+function renderScenarios(){
+  const grid = document.getElementById('scenario-grid');
+  const compare = document.getElementById('scenario-compare');
+  const btn = document.getElementById('btn-add-scenario');
+  const msg = document.getElementById('scenario-limit-msg');
+
+  if(S.scenarios.length >= 4){
+    btn.disabled = true;
+    msg.textContent = '최대 4개까지 비교할 수 있습니다';
+  } else {
+    btn.disabled = false;
+    msg.textContent = '';
+  }
+
+  if(S.scenarios.length === 0){
+    grid.innerHTML = '<div class="scenario-empty"><div class="icon">🔬</div><p>프리셋을 선택하거나 슬라이더를 조정한 뒤<br>\'시나리오 추가\'를 눌러보세요</p></div>';
+    compare.classList.add('hidden');
+    return;
+  }
+
+  grid.innerHTML = S.scenarios.map((s, i) => {
+    const p = { ...S.p, kr: s.kr, us: s.us };
+    const costs = calcCostsFor(p);
+    const score = calcScoreFor(s.fxRate, p);
+    const sc = score.total;
+    const cls = sc >= 65 ? 'high' : sc >= 45 ? 'medium' : 'low';
+    const tag = sc >= 65 ? '✦ 매력적' : sc >= 45 ? '△ 보통' : '✕ 부담';
+    const tagCls = sc >= 65 ? 'high' : sc >= 45 ? 'medium' : 'low';
+    const rateDiff = s.us - s.kr;
+    return `<div class="scenario-card">
+      <div class="scenario-card-head">
+        <div class="scenario-card-name">${esc(s.name)}</div>
+        <button type="button" class="scenario-card-del" onclick="removeScenario(${i})">✕</button>
+      </div>
+      <div class="scenario-card-conditions">
+        환율: ${s.fxRate.toLocaleString('ko-KR')}원<br>
+        한국 금리: ${s.kr.toFixed(2)}% · 미국 금리: ${s.us.toFixed(2)}%<br>
+        금리차: ${rateDiff >= 0 ? '+' : ''}${rateDiff.toFixed(2)}%p
+      </div>
+      <div class="scenario-score-wrap">
+        <div class="scenario-score-circle ${cls}">
+          <span class="scenario-score-num">${sc}</span>
+          <span class="scenario-score-label">/100</span>
+        </div>
+        <div class="scenario-score-info">
+          <div class="total-cost">총 비용 ${costs.totalPct.toFixed(2)}%</div>
+          <div class="cost-detail">
+            헤지 ${costs.hedgePct.toFixed(2)}% · 거래세 ${costs.txPct.toFixed(3)}% · 배당세 ${costs.divPct.toFixed(2)}%
+          </div>
+        </div>
+      </div>
+      <span class="attract-badge ${tagCls}">${tag}</span>
+    </div>`;
+  }).join('');
+
+  // 비교 바 차트
+  if(S.scenarios.length >= 2){
+    compare.classList.remove('hidden');
+    document.getElementById('scenario-compare-bars').innerHTML = S.scenarios.map((s, i) => {
+      const p = { ...S.p, kr: s.kr, us: s.us };
+      const score = calcScoreFor(s.fxRate, p);
+      const sc = score.total;
+      const color = sc >= 65 ? 'var(--positive)' : sc >= 45 ? 'var(--warn)' : 'var(--negative)';
+      return `<div class="compare-bar-row">
+        <div class="compare-bar-name">${esc(s.name)}</div>
+        <div class="compare-bar-track">
+          <div class="compare-bar-fill" style="width:${sc}%;background:${color}">${sc}점</div>
+        </div>
+        <div class="compare-bar-score" style="color:${color}">${sc}/100</div>
+      </div>`;
+    }).join('');
+  } else {
+    compare.classList.add('hidden');
+  }
+}
+
+// 슬라이더 이벤트 바인딩
+['sl-fx','sl-kr','sl-us'].forEach(id => {
+  document.getElementById(id).addEventListener('input', () => {
+    updateSliderLabels();
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  });
+});
 
 initFX();
 setInterval(initFX, 5*60*1000);
