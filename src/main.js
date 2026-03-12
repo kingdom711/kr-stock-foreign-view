@@ -300,7 +300,7 @@ function renderTable(){
     const effColor = c.totalPct<3?'var(--positive)':c.totalPct<6?'var(--warn)':'var(--negative)';
     return `<tr>
       <td><div class="sname">${esc(s.name)}</div><div class="scode">${esc(s.code)}</div></td>
-      <td style="color:var(--ink3)">₩${s.price.toLocaleString('ko-KR')}</td>
+      <td style="color:var(--ink3)">₩${s.price.toLocaleString('ko-KR')}${s.live===false?'<span class="cost-pct">(참고가)</span>':''}</td>
       <td>$${c.usdSpot.toFixed(4)}</td>
       <td class="cost-col">
         <div class="tip"><span style="cursor:help;text-decoration:underline dotted;text-underline-offset:2px">−$${c.hedgeUSD.toFixed(4)}</span>
@@ -345,18 +345,85 @@ function addStock(){
 
 function removeStock(i){ S.stocks.splice(i,1); renderTable(); }
 
-function loadSamples(){
-  S.stocks=[
-    {name:'삼성전자', code:'005930', price:74000},
-    {name:'SK하이닉스', code:'000660', price:196000},
-    {name:'LG에너지솔루션', code:'373220', price:320000},
-    {name:'포스코홀딩스', code:'005490', price:390000},
-    {name:'현대자동차', code:'005380', price:235000},
-    {name:'NAVER', code:'035420', price:178000},
-    {name:'카카오', code:'035720', price:36000},
-    {name:'셀트리온', code:'068270', price:170000},
-  ];
+// ── 주가 실시간 조회 (CORS proxy + Yahoo Finance) ──────────────────
+const STOCK_APIS = [
+  {
+    name: 'Yahoo Finance (allorigins)',
+    url: code => `https://api.allorigins.win/raw?url=${encodeURIComponent(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${code}.KS?range=1d&interval=1d`
+    )}`,
+    get: d => d?.chart?.result?.[0]?.meta?.regularMarketPrice ?? null
+  },
+  {
+    name: 'Yahoo Finance (codetabs)',
+    url: code => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${code}.KS?range=1d&interval=1d`
+    )}`,
+    get: d => d?.chart?.result?.[0]?.meta?.regularMarketPrice ?? null
+  }
+];
+
+async function fetchStockPrice(code) {
+  for (const api of STOCK_APIS) {
+    try {
+      const res = await fetchWithTimeout(api.url(code), 8000);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const price = api.get(data);
+      if (price && price > 100 && price < 50000000) {
+        console.log(`[주가] ${api.name} 성공: ${code} = ₩${price}`);
+        return { price, source: api.name };
+      }
+    } catch (e) {
+      console.warn(`[주가] ${api.name} 실패 (${code}):`, e.message);
+    }
+  }
+  return null;
+}
+
+const SAMPLE_STOCKS = [
+  {name:'삼성전자',       code:'005930', fallback:74000},
+  {name:'SK하이닉스',     code:'000660', fallback:196000},
+  {name:'LG에너지솔루션', code:'373220', fallback:320000},
+  {name:'포스코홀딩스',   code:'005490', fallback:390000},
+  {name:'현대자동차',     code:'005380', fallback:235000},
+  {name:'NAVER',          code:'035420', fallback:178000},
+  {name:'카카오',         code:'035720', fallback:36000},
+  {name:'셀트리온',       code:'068270', fallback:170000},
+];
+
+async function loadSamples(){
+  const btn = document.querySelector('.btn-sample');
+  btn.textContent = '시세 조회 중...';
+  btn.disabled = true;
+
+  // 우선 폴백 가격으로 즉시 표시
+  S.stocks = SAMPLE_STOCKS.map(s => ({name:s.name, code:s.code, price:s.fallback, live:false}));
   renderTable();
+
+  // 병렬로 실시간 가격 조회
+  const results = await Promise.allSettled(
+    SAMPLE_STOCKS.map(s => fetchStockPrice(s.code))
+  );
+
+  let liveCount = 0;
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled' && r.value) {
+      S.stocks[i].price = r.value.price;
+      S.stocks[i].live = true;
+      liveCount++;
+    }
+  });
+
+  renderTable();
+  btn.disabled = false;
+  if (liveCount === SAMPLE_STOCKS.length) {
+    btn.textContent = '대표 종목 불러오기';
+  } else if (liveCount > 0) {
+    btn.textContent = `대표 종목 불러오기 (${liveCount}/${SAMPLE_STOCKS.length} 실시간)`;
+  } else {
+    btn.textContent = '대표 종목 불러오기 (참고가)';
+  }
 }
 
 function applyParams(){
